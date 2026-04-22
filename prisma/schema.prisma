@@ -1,0 +1,24 @@
+// Minimal Prisma schema — Phase 1 placeholder, wired so migrations work.
+// Full Visitor/Conversation/Message/Report/Lead models arrive in Phase 2
+// per spec Section 5.3.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Server-side log of HeyGen API health-check state transitions.
+/// Phase 1: lets us audit fallback switchovers (spec §4.4).
+model HealthEvent {
+  id        Int      @id @default(autoincrement())
+  at        DateTime @default(now())
+  state     String   // "healthy" | "degraded" | "down"
+  detail    String?
+  latencyMs Int?
+
+  @@index([at])
+}
