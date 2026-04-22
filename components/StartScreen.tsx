@@ -4,14 +4,17 @@ import { useCallback, useRef, useState } from "react";
 import clsx from "clsx";
 
 import HeyGenFallback from "@/components/HeyGenFallback";
+import Spinner from "@/components/Spinner";
 import { useContainerAspect } from "@/hooks/useContainerAspect";
 import { useHeyGenHealth } from "@/hooks/useHeyGenHealth";
+import { prewarmMicrophonePermission } from "@/lib/microphone";
 
 type Mode = "idle" | "intro";
 
 export default function StartScreen() {
   const { ref, orientation } = useContainerAspect<HTMLDivElement>();
   const [mode, setMode] = useState<Mode>("idle");
+  const [introKey, setIntroKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const fallbackUrl = process.env.NEXT_PUBLIC_HEYGEN_FALLBACK_EMBED_URL ?? "";
@@ -30,18 +33,28 @@ export default function StartScreen() {
   const videoSrc =
     orientation === "portrait" ? "/AZa-intro-mob.mp4" : "/AZa-intro.mp4";
 
-  const playIntro = useCallback(async () => {
+  const playIntro = useCallback(() => {
     setMode("intro");
-    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    setIntroKey((k) => k + 1);
+
+    // Call play() synchronously within the click handler so the browser
+    // still treats this as a user-gesture and allows audio playback.
     const v = videoRef.current;
-    if (!v) return;
-    try {
-      v.muted = true;
-      v.playsInline = true;
-      await v.play();
-    } catch {
-      // Autoplay rejected despite user gesture — leave the poster frame up.
+    if (v) {
+      v.muted = false;
+      v.currentTime = 0;
+      v.play().catch((err) => {
+        // Audio blocked despite the gesture (older iOS, strict autoplay
+        // policies). Retry muted so the visual still plays.
+        console.warn("Audio playback blocked, retrying muted:", err);
+        v.muted = true;
+        v.play().catch(() => {});
+      });
     }
+
+    // Pre-grant mic permission in parallel so the prompt appears while
+    // the intro plays. Fire-and-forget.
+    void prewarmMicrophonePermission();
   }, []);
 
   const returnToIdle = useCallback(() => {
@@ -52,6 +65,17 @@ export default function StartScreen() {
     }
     setMode("idle");
   }, []);
+
+  // iOS Safari can pause background media when the mic is activated.
+  // Resume automatically while the intro is still meant to be playing.
+  const handleVideoPause = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.ended) return;
+    if (mode !== "intro") return;
+    if (document.visibilityState === "hidden") return;
+    v.play().catch(() => {});
+  }, [mode]);
 
   if (useFallback) {
     return (
@@ -67,18 +91,14 @@ export default function StartScreen() {
         className={clsx(
           "absolute inset-0 bg-cover bg-center transition-opacity duration-500",
           "bg-[url('/AZa-bg.webp')] hover:bg-[url('/AZa-bg-hover-gif.webp')]",
-          mode === "idle"
-            ? "opacity-100"
-            : "pointer-events-none opacity-0",
+          mode === "idle" ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       />
 
       <div
         className={clsx(
           "absolute inset-0 flex items-end justify-center pb-[10%] transition-opacity duration-300",
-          mode === "idle"
-            ? "opacity-100"
-            : "pointer-events-none opacity-0",
+          mode === "idle" ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
         <button
@@ -95,34 +115,44 @@ export default function StartScreen() {
         </button>
       </div>
 
-      {mode === "intro" && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black">
-          <video
-            ref={videoRef}
-            src={videoSrc}
-            muted
-            playsInline
-            preload="auto"
-            onEnded={returnToIdle}
-            className={clsx(
-              "absolute",
-              orientation === "portrait"
-                ? "left-0 right-0 h-auto w-full"
-                : "top-0 bottom-0 h-full w-auto",
-            )}
-          >
-            <track kind="captions" />
-          </video>
-          <button
-            type="button"
-            aria-label="Close intro"
-            onClick={returnToIdle}
-            className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-sm text-white backdrop-blur hover:bg-black/70"
-          >
-            Close
-          </button>
+      {/* Intro video stays mounted so play() runs synchronously from the
+          click and the user-gesture audio permission is preserved. */}
+      <div
+        className={clsx(
+          "absolute inset-0 z-20 flex items-center justify-center bg-black transition-opacity duration-300",
+          mode === "intro" ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+      >
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          playsInline
+          preload="auto"
+          onEnded={returnToIdle}
+          onPause={handleVideoPause}
+          className={clsx(
+            "absolute",
+            orientation === "portrait"
+              ? "left-0 right-0 h-auto w-full"
+              : "top-0 bottom-0 h-full w-auto",
+          )}
+        >
+          <track kind="captions" />
+        </video>
+
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <Spinner runKey={introKey} />
         </div>
-      )}
+
+        <button
+          type="button"
+          aria-label="Close intro"
+          onClick={returnToIdle}
+          className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-sm text-white backdrop-blur hover:bg-black/70"
+        >
+          Close
+        </button>
+      </div>
     </main>
   );
 }
