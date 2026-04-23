@@ -26,3 +26,18 @@ Thumbs.db
 
 *.tsbuildinfo
 next-env.d.ts
+
+# Cloudways-specific deploy artifacts — generated directly on the server
+# and kept there, so they survive Git pulls without polluting the repo.
+.htaccess
+ecosystem.config.js
+
+# SQLite artifacts created by local dev
+*.db
+*.db-journal
+dev.db
+dev2.db
+
+# Claude Code / Playwright MCP working dirs
+.claude/
+.playwright-mcp/

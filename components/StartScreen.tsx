@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 
 import HeyGenFallback from "@/components/HeyGenFallback";
@@ -29,6 +29,16 @@ export default function StartScreen() {
     intervalMs: pollIntervalMs,
     failureThreshold,
   });
+
+  // Dev-only override: append `?fallback=1` to the URL to preview the
+  // HeyGen hosted embed without breaking the API key.
+  const [forceFallback, setForceFallback] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setForceFallback(params.get("fallback") === "1");
+  }, []);
+  const showFallback = forceFallback || useFallback;
 
   const videoSrc =
     orientation === "portrait" ? "/AZa-intro-mob.mp4" : "/AZa-intro.mp4";
@@ -77,7 +87,7 @@ export default function StartScreen() {
     v.play().catch(() => {});
   }, [mode]);
 
-  if (useFallback) {
+  if (showFallback) {
     return (
       <main ref={ref} className="h-full w-full">
         <HeyGenFallback embedUrl={fallbackUrl} />

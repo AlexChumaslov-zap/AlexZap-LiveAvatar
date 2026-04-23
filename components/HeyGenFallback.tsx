@@ -35,7 +35,18 @@ export default function HeyGenFallback({ embedUrl }: Props) {
       if (e.origin !== host) return;
       const data = e.data as { type?: string; action?: string } | undefined;
       if (!data || data.type !== "streaming-embed") return;
-      if (data.action === "init") wrap.classList.add("opacity-100");
+      switch (data.action) {
+        case "init":
+          wrap.classList.add("opacity-100");
+          break;
+        case "show":
+        case "hide":
+          // Our fallback takes over the full viewport, so HeyGen's
+          // circle→expanded transition is a no-op here. We still receive
+          // and process these events so the embed considers its parent
+          // handshake complete.
+          break;
+      }
     };
 
     window.addEventListener("message", onMessage);

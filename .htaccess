@@ -1,0 +1,27 @@
+DirectoryIndex disabled
+
+# Reverse-proxy every request to the Next.js process listening on port 3002.
+RewriteEngine On
+RewriteBase /
+RewriteRule ^(.*)$ http://127.0.0.1:3002/$1 [P,L]
+
+# Pass the real scheme/host through so Next generates correct absolute URLs.
+<IfModule mod_headers.c>
+  RequestHeader set X-Forwarded-Proto "https"
+  RequestHeader set X-Forwarded-Host %{HTTP_HOST}e
+</IfModule>
+
+# Block access to sensitive files
+<FilesMatch "^\.env|\.git|package-lock\.json|package\.json|prisma|schema\.prisma|ecosystem\.config\.js|middleware\.ts|tsconfig\.json|next\.config\.(js|ts)">
+  Order allow,deny
+  Deny from all
+</FilesMatch>
+
+# Prevent access to all hidden files and directories
+<FilesMatch "^\.">
+  Order allow,deny
+  Deny from all
+</FilesMatch>
+
+# Set default character set
+AddDefaultCharset UTF-8

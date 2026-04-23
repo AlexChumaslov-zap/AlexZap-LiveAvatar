@@ -4,7 +4,11 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PROBE_URL = "https://api.heygen.com/v1/avatar.list";
+// HeyGen's Streaming Avatar API (api.heygen.com/v1/streaming.*) was sunset
+// in March 2026. The new LiveAvatar API lives at a different host. Probing
+// `/v1/users/credits` validates the key, confirms the service is up, and
+// doesn't consume session quota.
+const PROBE_URL = "https://api.liveavatar.com/v1/users/credits";
 const TIMEOUT_MS = 5_000;
 
 type HealthState = "healthy" | "degraded" | "down";
@@ -28,7 +32,7 @@ async function probe(): Promise<{
   try {
     const res = await fetch(PROBE_URL, {
       method: "GET",
-      headers: { "X-Api-Key": apiKey, Accept: "application/json" },
+      headers: { "X-API-KEY": apiKey, Accept: "application/json" },
       signal: controller.signal,
       cache: "no-store",
     });
