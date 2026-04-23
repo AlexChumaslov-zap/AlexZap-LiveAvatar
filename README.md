@@ -13,16 +13,16 @@ Current status: **Phase 1, MVP step 1** — start screen with background image /
 
 ## Prerequisites
 
-- Node.js ≥ 22.13 (22.12 works but throws an `EBADENGINE` warning on one transitive ESLint dep)
+- Node.js 20.x or 22.x (see `engines` in [package.json](./package.json))
 - npm 10+
+- Git with SSH access to [AlexChumaslov-zap/AlexZap-LiveAvatar](https://github.com/AlexChumaslov-zap/AlexZap-LiveAvatar) (private)
 
 ## First-time setup
 
 ```bash
-npm install
+npm install                # runs `prisma generate` via postinstall
 cp .env.example .env       # then fill in real values
-npx prisma generate
-npx prisma db push         # creates ./dev.db and the HealthEvent table
+npm run db:migrate         # applies migrations, creates ./dev.db
 ```
 
 Minimum env vars to boot the app:
@@ -103,6 +103,98 @@ All in place from this commit:
 - HeyGen API key stays server-side (consumed only by `/api/heygen-health`); the browser only ever gets the public fallback share URL.
 
 The CSP is deliberately permissive for inline styles/scripts today (Next inlines runtime chunks); we'll tighten to a nonce-based policy before production.
+
+## Deploying to Cloudways
+
+Cloudways hosts the app as a **Node.js application** with Git-based deployment — no Docker needed. Throughout this guide, `<app>` is the Cloudways application short-name **`AlexZap-LiveAvatar`**.
+
+### 1. Create the Cloudways app
+
+- **Application → Create**: pick **Node.js**.
+- Runtime: **Node 20.x** (also accepts 22.x per this repo's `engines`).
+- Note the app SSH path: `/home/master/applications/AlexZap-LiveAvatar/`.
+- Take note of the default Cloudways-assigned URL (e.g. `phpstack-<id>.cloudwaysapps.com` or similar) — we'll use this until a custom domain is bound.
+
+### 2. Persistent storage for SQLite
+
+Cloudways replaces `public_html/` on each deploy — never put the DB there. Create a sibling directory under `private_html/` that the deploy doesn't touch:
+
+```bash
+ssh master@<cloudways-server> \
+  "mkdir -p /home/master/applications/AlexZap-LiveAvatar/private_html/.data"
+```
+
+### 3. Link the GitHub repo
+
+**Application Management → Deployment via Git:**
+- Repo: `git@github.com:AlexChumaslov-zap/AlexZap-LiveAvatar.git`
+- Branch: `main`
+- Deploy path: `public_html`
+- Copy Cloudways' generated deploy key and add it as a **Deploy Key** under the GitHub repo's **Settings → Deploy keys** (read-only is enough).
+
+### 4. Deploy command
+
+In **Deployment via Git → Pre-Launch Actions** (Cloudways runs this before starting the app):
+
+```
+npm ci && npx prisma migrate deploy && npm run build
+```
+
+`prisma generate` runs automatically via `postinstall`. `migrate deploy` applies [prisma/migrations/](./prisma/migrations/) without prompting.
+
+### 5. Start command
+
+**Application Settings → Node.js:**
+- Entry point: `node_modules/next/dist/bin/next` with args `start -p 3000`, or `npm start` if the UI accepts it.
+- Port: `3000` (Cloudways reverse-proxies from 80/443).
+
+### 6. Environment variables
+
+In **Application Management → Environment Variables**, set:
+
+| Var | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | `file:/home/master/applications/AlexZap-LiveAvatar/private_html/.data/alex-zap.db` |
+| `HEYGEN_API_KEY` | (real key, server-only) |
+| `NEXT_PUBLIC_HEYGEN_FALLBACK_EMBED_URL` | HeyGen share URL |
+| `ALLOWED_PARENT_ORIGINS` | `https://www.zaptest.com https://zaptest.com` |
+| `NEXT_PUBLIC_HEALTH_POLL_INTERVAL_MS` | `30000` |
+| `NEXT_PUBLIC_HEALTH_FAILURE_THRESHOLD` | `2` |
+| `NEXT_TELEMETRY_DISABLED` | `1` |
+
+### 7. Domain + SSL
+
+For the initial deploy, use the Cloudways-assigned URL — no extra setup. Two things to know:
+
+- SSL is still essential on the Cloudways URL. Enable **Application Management → SSL Certificate → Let's Encrypt** against the Cloudways hostname. Browsers block mixed content when the parent page is HTTPS.
+- When you later bind a real domain (e.g. `avatar.zaptest.com`): add it under **Domain Management**, re-issue Let's Encrypt for that hostname, and update `ALLOWED_PARENT_ORIGINS` if anything other than zaptest.com will embed this app.
+
+### 8. Iframe parent requirements
+
+The page on `zaptest.com` that embeds this app must use:
+
+```html
+<iframe src="https://<cloudways-or-custom-domain>/"
+        allow="microphone; autoplay"
+        style="width:100%; aspect-ratio: 16/9; border:0"></iframe>
+```
+
+`allow="microphone"` is mandatory for Phase 2 voice mode — without it, the pre-grant prompt throws `NotAllowedError` and the chat won't work.
+
+### 9. Post-deploy smoke test
+
+Replace `<deploy-url>` with the Cloudways-assigned URL (or your custom domain once bound):
+
+```bash
+curl -sI https://<deploy-url>/ | grep -iE "content-security|x-frame|referrer|strict-transport"
+curl -s   https://<deploy-url>/api/health          # expect { status: "ok" }
+curl -s   https://<deploy-url>/api/heygen-health   # expect { state: "healthy" }
+```
+
+### 10. Uptime monitoring
+
+Point an external monitor (UptimeRobot / Better Stack) at **`/api/health`** — it returns 200 as long as the Next.js process is alive, independent of HeyGen. Use `/api/heygen-health` as a separate check if you want a dedicated alert on HeyGen availability.
 
 ## Next steps (not yet built)
 
