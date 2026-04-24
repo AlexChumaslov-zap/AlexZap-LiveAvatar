@@ -9,13 +9,19 @@ import { useContainerAspect } from "@/hooks/useContainerAspect";
 import { useHeyGenHealth } from "@/hooks/useHeyGenHealth";
 import { prewarmMicrophonePermission } from "@/lib/microphone";
 
-type Mode = "idle" | "intro";
+type Mode = "idle" | "intro" | "fallback";
 
 export default function StartScreen() {
   const { ref, orientation } = useContainerAspect<HTMLDivElement>();
   const [mode, setMode] = useState<Mode>("idle");
   const [introKey, setIntroKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Phase 1 placeholder for the Live Avatar session status. Phase 2 will
+  // flip this to `true` once the SDK reports a working session; for now
+  // every intro naturally resolves to the fallback path because no
+  // connection is ever established.
+  const connectionEstablishedRef = useRef(false);
 
   const fallbackUrl = process.env.NEXT_PUBLIC_HEYGEN_FALLBACK_EMBED_URL ?? "";
   const pollIntervalMs = Number(
@@ -38,7 +44,7 @@ export default function StartScreen() {
     const params = new URLSearchParams(window.location.search);
     setForceFallback(params.get("fallback") === "1");
   }, []);
-  const showFallback = forceFallback || useFallback;
+  const showFallback = mode === "fallback" || forceFallback || useFallback;
 
   const videoSrc =
     orientation === "portrait" ? "/AZa-intro-mob.mp4" : "/AZa-intro.mp4";
@@ -46,6 +52,7 @@ export default function StartScreen() {
   const playIntro = useCallback(() => {
     setMode("intro");
     setIntroKey((k) => k + 1);
+    connectionEstablishedRef.current = false;
 
     // Call play() synchronously within the click handler so the browser
     // still treats this as a user-gesture and allows audio playback.
@@ -65,6 +72,10 @@ export default function StartScreen() {
     // Pre-grant mic permission in parallel so the prompt appears while
     // the intro plays. Fire-and-forget.
     void prewarmMicrophonePermission();
+
+    // Phase 2 will kick off the Live Avatar session here and set
+    // connectionEstablishedRef.current = true once the SDK confirms
+    // the session is ready.
   }, []);
 
   const returnToIdle = useCallback(() => {
@@ -74,6 +85,25 @@ export default function StartScreen() {
       v.currentTime = 0;
     }
     setMode("idle");
+  }, []);
+
+  // Fired when the intro video finishes playing. If the Live Avatar
+  // session hasn't reported a working connection by now, we drop to the
+  // fallback state (Step 3 of the user flow). Phase 2 will branch here
+  // to the active avatar UI when `connectionEstablishedRef.current` is
+  // true.
+  const handleIntroEnded = useCallback(() => {
+    const v = videoRef.current;
+    if (v) {
+      v.pause();
+      v.currentTime = 0;
+    }
+    if (connectionEstablishedRef.current) {
+      // Phase 2: transition to live avatar session here.
+      setMode("idle");
+      return;
+    }
+    setMode("fallback");
   }, []);
 
   // iOS Safari can pause background media when the mic is activated.
@@ -89,8 +119,18 @@ export default function StartScreen() {
 
   if (showFallback) {
     return (
-      <main ref={ref} className="h-full w-full">
+      <main ref={ref} className="relative h-full w-full">
         <HeyGenFallback embedUrl={fallbackUrl} />
+        {mode === "fallback" && (
+          <button
+            type="button"
+            onClick={returnToIdle}
+            aria-label="Back to start"
+            className="absolute right-4 top-4 z-30 rounded-full bg-black/50 px-3 py-1 text-sm text-white backdrop-blur hover:bg-black/70"
+          >
+            Back
+          </button>
+        )}
       </main>
     );
   }
@@ -138,7 +178,7 @@ export default function StartScreen() {
           src={videoSrc}
           playsInline
           preload="auto"
-          onEnded={returnToIdle}
+          onEnded={handleIntroEnded}
           onPause={handleVideoPause}
           className={clsx(
             "absolute",
