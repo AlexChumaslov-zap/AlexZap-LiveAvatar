@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import clsx from "clsx";
+
+import AnimatedFallback from "@/components/AnimatedFallback";
 
 type Props = {
   /** HeyGen share URL, e.g. https://labs.heygen.com/guest/streaming-embed?share=... */
@@ -18,6 +21,7 @@ type Props = {
 export default function HeyGenFallback({ embedUrl }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -55,10 +59,13 @@ export default function HeyGenFallback({ embedUrl }: Props) {
 
   if (!embedUrl) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-black text-white/70">
-        <p className="max-w-sm text-center text-sm">
-          Avatar temporarily unavailable. Please check back shortly.
-        </p>
+      <div className="relative h-full w-full overflow-hidden bg-black">
+        <AnimatedFallback className="h-full w-full object-cover" />
+        <div className="absolute inset-x-0 bottom-8 text-center text-white/80">
+          <p className="text-sm">
+            Avatar temporarily unavailable. Please check back shortly.
+          </p>
+        </div>
       </div>
     );
   }
@@ -66,15 +73,28 @@ export default function HeyGenFallback({ embedUrl }: Props) {
   return (
     <div
       ref={wrapRef}
-      className="relative h-full w-full bg-black opacity-0 transition-opacity duration-300"
+      className="relative h-full w-full overflow-hidden bg-black opacity-0 transition-opacity duration-300"
     >
+      {/* Animated poster shown beneath the iframe. Visible while HeyGen's
+          embed is loading (or if it never loads) and fades out once the
+          iframe signals `load`. */}
+      <AnimatedFallback
+        className={clsx(
+          "absolute inset-0 h-full w-full object-cover transition-opacity duration-500",
+          iframeLoaded ? "opacity-0" : "opacity-100",
+        )}
+      />
       <iframe
         ref={iframeRef}
         allow="microphone"
-        className="h-full w-full border-0"
+        className={clsx(
+          "absolute inset-0 h-full w-full border-0 transition-opacity duration-500",
+          iframeLoaded ? "opacity-100" : "opacity-0",
+        )}
         sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
         src={embedUrl}
         title="HeyGen Streaming Embed (fallback)"
+        onLoad={() => setIframeLoaded(true)}
       />
     </div>
   );
